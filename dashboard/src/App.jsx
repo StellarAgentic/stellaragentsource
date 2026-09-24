@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
+import { isConnected, setAllowed, getUserInfo } from '@stellar/freighter-api'
+import { Horizon } from '@stellar/stellar-sdk'
 import './index.css'
 
 // ═══════════════════════════════════════════════════
@@ -406,7 +408,7 @@ function TransactionsPage({ transactions }) {
   )
 }
 
-function SettingsPage() {
+function SettingsPage({ pubKey, onConnectWallet }) {
   return (
     <>
       <div className="page-header">
@@ -435,14 +437,18 @@ function SettingsPage() {
           <div className="card-title mb-md">Wallet Connection</div>
           <div className="form-group">
             <label className="form-label">Connected Wallet</label>
-            <input className="form-input mono" value="GDEVELOPER_PUBLIC_KEY..." readOnly />
+            <input className="form-input mono" value={pubKey || "Not Connected"} readOnly />
           </div>
           <div className="form-group">
             <label className="form-label">Wallet Provider</label>
             <input className="form-input" value="Freighter" readOnly />
           </div>
           <div className="mt-lg">
-            <button className="btn btn-secondary" id="reconnect-wallet">🔗 Reconnect Wallet</button>
+            {!pubKey ? (
+               <button className="btn btn-primary" onClick={onConnectWallet}>🔗 Connect Wallet</button>
+            ) : (
+               <button className="btn btn-secondary" onClick={onConnectWallet}>🔗 Reconnect Wallet</button>
+            )}
           </div>
         </div>
       </div>
@@ -456,11 +462,57 @@ function SettingsPage() {
 
 function App() {
   const [page, setPage] = useState('overview')
-  const [balance, setBalance] = useState(1250.00)
+  const [balance, setBalance] = useState(0.00)
   const [agents, setAgents] = useState(MOCK_AGENTS)
   const [transactions] = useState(MOCK_TRANSACTIONS)
   const [showDeposit, setShowDeposit] = useState(false)
   const [showRegister, setShowRegister] = useState(false)
+  const [pubKey, setPubKey] = useState(null)
+
+  const fetchTestnetBalance = async (publicKey) => {
+    try {
+      const server = new Horizon.Server("https://horizon-testnet.stellar.org");
+      const account = await server.loadAccount(publicKey);
+      const nativeBalance = account.balances.find(b => b.asset_type === 'native');
+      if (nativeBalance) {
+        setBalance(parseFloat(nativeBalance.balance));
+      }
+    } catch (error) {
+      console.error("Could not fetch balance from testnet, maybe account is unfunded?", error);
+      setBalance(0);
+    }
+  }
+
+  useEffect(() => {
+    // Check if previously connected
+    const checkConnection = async () => {
+      if (await isConnected()) {
+        try {
+           const userInfo = await getUserInfo();
+           if (userInfo.publicKey) {
+             setPubKey(userInfo.publicKey);
+             fetchTestnetBalance(userInfo.publicKey);
+           }
+        } catch (e) {
+           console.error("Wallet check failed", e);
+        }
+      }
+    };
+    checkConnection();
+  }, [])
+
+  const connectWallet = async () => {
+    if (await isConnected()) {
+       await setAllowed();
+       const userInfo = await getUserInfo();
+       if (userInfo.publicKey) {
+         setPubKey(userInfo.publicKey);
+         fetchTestnetBalance(userInfo.publicKey);
+       }
+    } else {
+       alert("Please install Freighter wallet!");
+    }
+  }
 
   const handleDeposit = useCallback((amount) => {
     setBalance(prev => prev + amount)
@@ -520,6 +572,11 @@ function App() {
             <span className="pulse-dot" />
             <span className="text-sm">Stellar Testnet</span>
           </div>
+          <div className="mt-md" style={{ padding: '0 12px' }}>
+            <button className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }} onClick={connectWallet}>
+              {pubKey ? `${pubKey.slice(0, 4)}...${pubKey.slice(-4)}` : '🔗 Connect Wallet'}
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -541,7 +598,7 @@ function App() {
           />
         )}
         {page === 'transactions' && <TransactionsPage transactions={transactions} />}
-        {page === 'settings' && <SettingsPage />}
+        {page === 'settings' && <SettingsPage pubKey={pubKey} onConnectWallet={connectWallet} />}
       </main>
 
       {/* Modals */}
